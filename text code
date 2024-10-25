@@ -1,0 +1,68 @@
+import numpy as np
+from skimage import io, color
+
+def compute_coarseness(image):
+    """
+    Compute the coarseness of an image based on Tamura's texture features.
+    
+    Parameters:
+    image (numpy array): Input image in grayscale or RGB format.
+    
+    Returns:
+    float: Coarseness value.
+    """
+    # Convert image to grayscale if it is in RGB format
+    if len(image.shape) == 3:
+        image = color.rgb2gray(image)
+    
+    # Normalize the image to the range [0, 1]
+    image = image / image.max()
+    
+    # Define different window sizes (scales) to analyze the texture
+    scales = [1, 2, 4, 8, 16]
+    
+    # Initialize arrays to store horizontal and vertical differences
+    E_h = np.zeros((len(scales), image.shape[0], image.shape[1]))
+    E_v = np.zeros((len(scales), image.shape[0], image.shape[1]))
+    
+    for i, scale in enumerate(scales):
+        # Calculate horizontal and vertical differences for each scale
+        if image.shape[0] > scale and image.shape[1] > scale:
+            E_h[i, scale:-scale, scale:-scale] = np.abs(
+                image[scale:-scale, 2*scale:] - image[scale:-scale, :-2*scale]
+            ) / (2 * scale)
+            E_v[i, scale:-scale, scale:-scale] = np.abs(
+                image[2*scale:, scale:-scale] - image[:-2*scale, scale:-scale]
+            ) / (2 * scale)
+    
+    # Compute the maximum difference for each pixel across all scales
+    E = np.maximum(E_h, E_v)
+    
+  # Select the scale with the maximum difference for each pixel
+    S_best = np.argmax(E, axis=0)
+    
+    # Compute the average best scale as the coarseness measure
+    coarseness = np.mean(scales[S_best])
+    
+    return coarseness
+
+------------------------------------------------------------------------------------------------------------
+Measuring Texture Feature Coarseness
+1. Input Image
+Start with the input image.
+2. Define Neighborhood Sizes
+Define a set of neighborhood sizes 𝑘k (e.g., 1𝑥1,2𝑥2,4𝑥4,…1x1,2x2,4x4,…).
+3. Compute Local Averages
+For each pixel (𝑖,𝑗)(i,j) in the image, compute the average gray level 𝐴𝑘(𝑖,𝑗)Ak​(i,j) over neighborhoods of size 2𝑘×2𝑘2k×2k.
+4. Compute Differences
+For each neighborhood size 𝑘k:
+Compute the horizontal difference 𝐷ℎ(𝑖,𝑗,𝑘)=∣𝐴𝑘(𝑖+2𝑘,𝑗)−𝐴𝑘(𝑖−2𝑘,𝑗)∣Dh​(i,j,k)=∣Ak​(i+2k,j)−Ak​(i−2k,j)∣.
+Compute the vertical difference 𝐷𝑣(𝑖,𝑗,𝑘)=∣𝐴𝑘(𝑖,𝑗+2𝑘)−𝐴𝑘(𝑖,𝑗−2𝑘)∣Dv​(i,j,k)=∣Ak​(i,j+2k)−Ak​(i,j−2k)∣.
+5. Determine Maximum Difference
+For each pixel (𝑖,𝑗)(i,j):
+Find the neighborhood size 𝑘k that maximizes the sum of the differences 𝐷ℎDh​ and 𝐷𝑣Dv​:𝑆(𝑖,𝑗)=2𝑘𝑚𝑎𝑥S(i,j)=2kmax​
+Where 𝑘𝑚𝑎𝑥kmax​ is the scale that gives the maximum 𝐷ℎ+𝐷𝑣Dh​+Dv​.
+6. Compute Average Coarseness
+Average the values of 𝑆(𝑖,𝑗)S(i,j) over all pixels (𝑖,𝑗)(i,j) in the image to obtain the coarseness feature 𝐹𝑐𝑜𝑎𝑟𝑠𝑒Fcoarse​:𝐹𝑐𝑜𝑎𝑟𝑠𝑒=1𝑁∑𝑖,𝑗𝑆(𝑖,𝑗)Fcoarse​=N1​i,j∑​S(i,j)
+Where 𝑁N is the total number of pixels.
+------------------------------------------------------------------------------------------------------------  
