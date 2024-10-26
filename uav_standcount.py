@@ -4,282 +4,119 @@
 #
 # --------------------------------------------------------
 
+"""
+This module performs stand counting using UAV RGB images.
+The code detects and counts distinct objects (e.g., plants) based on contour detection.
 
-import numpy as np
+Explanation of Code Sections:
+Configuration and Initialization: A configuration dictionary, config, specifies minimum and maximum areas for valid objects to filter out noise and irrelevant objects.
+
+Image Preprocessing:
+
+Converts the image to grayscale.
+Applies Gaussian blur to smooth out the image and reduce noise.
+Uses binary thresholding to create a binary mask where objects are distinct from the background.
+Object Detection Using Contours:
+
+Finds contours (object boundaries) in the binary image.
+Filters contours based on area (using min_area and max_area) to count only objects that match the expected size of stands or plants.
+Main Counting Function:
+
+Combines preprocessing and object detection steps to get the final count of valid objects.
+Returns the result, including a count of detected stands and diagnostic information.
+"""
+
 import cv2
-import os
-import scipy.signal as signal
-import peakutils
-# import matplotlib.pyplot as plt
-# from operator import itemgetter
-# from itertools import groupby
-import pandas as pd
+import numpy as np
 
-"""
-elv = 40m: min_dist == 15 for peak detection
-elv = 60m: min_dist == 7 for peak detection
-"""
+def preprocess_image(image):
+    """
+    Preprocesses the input image by converting to grayscale, applying Gaussian blur, and using binary thresholding.
+    
+    Args:
+        image (numpy.ndarray): The input RGB image.
+    
+    Returns:
+        numpy.ndarray: Preprocessed binary image suitable for contour detection.
+    """
+    # Convert image to grayscale
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Apply Gaussian Blur to reduce noise and enhance object edges
+    blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+    
+    # Apply binary thresholding to create a binary image for contour detection
+    _, binary_image = cv2.threshold(blurred_image, 127, 255, cv2.THRESH_BINARY_INV)
+    
+    return binary_image
 
+def detect_objects(binary_image, config):
+    """
+    Detects objects in the binary image using contour detection, then filters based on size.
+    
+    Args:
+        binary_image (numpy.ndarray): The preprocessed binary image.
+        config (dict): Configuration dictionary containing object size thresholds.
+    
+    Returns:
+        int: Count of detected objects that meet the specified size criteria.
+    """
+    # Find contours in the binary image
+    contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    object_count = 0
+    for contour in contours:
+        # Calculate the area of each contour
+        area = cv2.contourArea(contour)
+        
+        # Filter based on area to exclude noise and non-relevant objects
+        if config["min_area"] < area < config["max_area"]:
+            object_count += 1
 
-class CornStandCount:
-    def __init__(self):
-        self.path = r'/Users/nan.an/Documents/Projects/StandCount/ILMN-CMY1-CMY2-CMY4_20170531_RGB/CMY1/PlotImages/'
-        self.filename = ''
-        self.maskname = ''
-        self.sum_row = []
-        self.splitpoint = 0
-        self.num_plant = 0
-        self.range = ''
-        self.column = ''
-        self.fieldID = ''
-        self.stand_table = ['AbsR' + ',' + 'AbsC' + ',' + 'UAV']
-        self.plant_table = ['AbsR' + ',' + 'AbsC' + ',' + 'LocX' + ',' + 'LocY']
-        self.plot_img_list = []
-        self.plot_rgb_list = []
-        self.plot_mask_list = []
-        self.peak_idx = []
-        self.plant_center_y = 0
-        self.min_peak_interval = 15  # this is related to flight elv and resolution
+    return object_count
 
-    def get_img_file_names(self):
-        files_list = os.listdir(self.path)
-        self.plot_img_list = [files_list[i] for i in range(0, len(files_list)) if files_list[i][0] == 'C']
-        # remove the file extension
-        self.plot_img_list = [os.path.splitext(self.plot_img_list[i])[0] for i in range(0, len(self.plot_img_list))]
-        # list plot mask images
-        #self.plot_mask_list = [self.plot_img_list[i] for i in range(0, len(self.plot_img_list)) if
-        #                       self.plot_img_list[i].split('_')[2] == 'RGB-mask']
-        self.plot_mask_list = [self.plot_img_list[i] for i in range(0, len(self.plot_img_list)) if
-                               self.plot_img_list[i].split('_')[2] == 'mask']
+def count_stands(image, config):
+    """
+    Main function to count objects in the image using preprocessing and detection functions.
+    
+    Args:
+        image (numpy.ndarray): The input UAV RGB image.
+        config (dict): Configuration dictionary containing parameters for processing and filtering.
+    
+    Returns:
+        dict: Result containing the count of detected stands and additional info.
+    """
+    # Preprocess the image to get a binary image for contour detection
+    binary_image = preprocess_image(image)
+    
+    # Detect and count objects in the binary image
+    stand_count = detect_objects(binary_image, config)
+    
+    return {
+        "stand_count": stand_count,
+        "details": "Stand counting completed using contour detection with size filtering."
+    }
 
-        # list plot rgb images
-        self.plot_rgb_list = [self.plot_img_list[i] for i in range(0, len(self.plot_img_list)) if
-                              self.plot_img_list[i].split('_')[2] == 'RGB']
-
-    def meta_parser(self, filename):
-        self.filename = filename
-        #self.maskname = filename + '-mask'
-        self.maskname = self.filename.split('_')[0] + '_' + self.filename.split('_')[1] + '_mask'
-        self.column = self.filename.split('_')[0][1:]
-        self.range = self.filename.split('_')[1][1:]
-
-    def list_duplicates(self, seq, item):
-        start_at = -1
-        locs = []
-        while True:
-            try:
-                loc = seq.index(item, start_at + 1)
-            except ValueError:
-                break
-            else:
-                locs.append(loc)
-                start_at = loc
-        return locs
-
-    def plant_count(self):
-        self.img = cv2.imread(os.path.join(self.path, self.maskname) + '.tif', 0)
-        self.rgb_img = cv2.imread(os.path.join(self.path, self.filename) + '.tif', 1)
-
-        # New canopy coverage mask can be a 0 - 1 binary image. Coverting it to 255.
-        if self.img.max() == 1:
-            self.img = self.img * 255
-        else:
-            pass
-
-        if self.img.max() == 0:
-            print(self.filename + 'is empty.')
-            pass
-        else:
-            """This is the section for splitting the two-row plot images to single row"""
-            rows, cols = self.img.shape
-            if rows > cols:
-                """The plot image is vertical"""
-                self.plot_img = np.rot90(self.img, k=1)  # k == the Number of times the array is rotated by 90 degrees.
-                self.plot_rgb_img = np.rot90(self.rgb_img, k=1)
-            else:
-                """The plot image is horizontal"""
-                self.plot_img = self.img
-                self.plot_rgb_img = self.rgb_img
-
-            # make the subplot folder for one-row images
-            subplot_dir = self.path + 'subplot/'
-            if not os.path.exists(subplot_dir):
-                os.makedirs(subplot_dir)
-
-            cv2.imwrite(os.path.join(subplot_dir, self.maskname) + '.tif', self.plot_img)
-            cv2.imwrite(os.path.join(subplot_dir, self.filename) + '.tif', self.plot_rgb_img)
-
-            # re-read the rotated plot image to avoid OpenCV bug
-            self.plot_img = cv2.imread(os.path.join(subplot_dir, self.maskname) + '.tif', 0)
-
-            rows_rot, cols_rot = self.plot_img.shape
-            # construct the row-side pixel count curve for finding the split point
-            self.sum_row = np.sum(self.plot_img, axis=1)
-            # finding the center of the space between two rows
-            # peakind = signal.find_peaks_cwt(self.sum_row, widths=np.arange(1, 20))
-            self.sum_row = self.sum_row.astype(int)
-            peakind = peakutils.indexes(self.sum_row,
-                                        thres=0.2,
-                                        min_dist=50)  # threshold here is for preventing low LAI CV on each row
-
-            if len(peakind) == 2 and peakind[0] > 20:  # This is for 2-row plots and the first row is not cut into half or more rows in the plot than the desired number.
-                self.splitpoint = int(np.mean(peakind))
-
-                # crop plot image
-                self.row_1 = self.plot_img[0:self.splitpoint, 0:cols_rot]
-                # cv2.imwrite(os.path.join(subplot_dir, self.filename) + "_row1.tif", self.row_1)
-                self.row_2 = self.plot_img[self.splitpoint:rows_rot, 0:cols_rot]
-                # cv2.imwrite(os.path.join(subplot_dir, self.filename) + "_row2.tif", self.row_2)
-
-                """This is the section for counting the plants"""
-                # initialize the numbers
-                num_row = 1
-                self.num_plant = 0
-
-                for singlerow_img in [self.row_1, self.row_2]:
-                    rows, cols = singlerow_img.shape
-
-                    # this is the index of the peak of each row
-                    j = 0
-
-                    # create a colorized image for plant labeling
-                    singlerow_color = np.dstack((singlerow_img, singlerow_img, singlerow_img))
-                    plot_color = np.dstack((self.plot_img, self.plot_img, self.plot_img))
-
-                    # construct the col-side pixel count curve for finding the split point
-                    sum_col = np.sum(singlerow_img, axis=0)
-
-                    # smooth the BV curve
-                    curve_smooth = signal.savgol_filter(sum_col, window_length=31, polyorder=5, deriv=0)
-
-                    # finding the peaks of the space between two rows -- method 1
-                    # peak_idx = signal.find_peaks_cwt(curve_smooth, widths=np.arange(1, 20))
-
-                    # find the peaks of the curve -- method 2
-                    # peaks_detect = np.r_[True, curve_smooth[1:] > curve_smooth[:-1]] & np.r_[curve_smooth[:-1] > curve_smooth[1:], True]
-                    # peak_idx = []
-                    # [peak_idx.append(i) for i in range(0, len(peaks_detect)) if peaks_detect[i] == True and curve_smooth[i] > 175]
-
-                    # find the peaks of the curve -- method 3
-                    self.peak_idx = peakutils.indexes(curve_smooth, min_dist=self.min_peak_interval)
-
-                    # the number of peaks is the estimation of the plants
-                    num_peaks = len(self.peak_idx)
-                    # print('the single row count is %d')%num_peaks
-
-                    # sum the two rows
-                    self.num_plant += num_peaks
-                    print(self.num_plant)
-
-                    # show the peak
-                    for i in range(0, len(self.peak_idx)):
-                        # plt.plot(peak_idx[i], curve_smooth[peak_idx[i]], '-o')
-
-                        # extract the pixel digial numbers for each peak column
-                        # print(self.peak_idx[i])
-
-                        col_px_dn = singlerow_img[:, self.peak_idx[i]]
-
-                        # refine the row center in each single row image
-                        row_y_profile = np.sum(singlerow_img, axis=1)
-                        row_y_profile = row_y_profile.astype(int)
-                        row_y_peak = peakutils.indexes(row_y_profile, min_dist=50)
-
-                        self.plant_center_y = row_y_peak[0]
-
-                        # show the plant location in coordinates
-                        # print(self.peak_idx[i], self.plant_center_y)
-
-                        if num_row == 1:
-                            plant_loc = (self.peak_idx[i], self.plant_center_y)
-                        elif num_row == 2:
-                            plant_loc = (self.peak_idx[i], self.plant_center_y + self.splitpoint)
-
-                        output_line_entry = self.range + ',' + self.column + ',' + str(plant_loc[0]) + ',' + str(
-                            plant_loc[1])
-                        self.plant_table.append(output_line_entry)
-
-                    j += 1
-                    # cv2.imwrite(subplot_dir + self.filename + '_' + str(num_row) + '.tif', singlerow_color)
-                    num_row += 1
-
-                    """
-                    # show the pixel BV curve
-                    plt.plot(range(0, len(sum_col)), sum_col, 'r', range(0, len(sum_col)), curve_smooth, 'b--')
-                    plt.xlim(0, cols)
-                    plt.show()
-
-                    # show image
-                    cv2.imshow('image for plant locations', singlerow_color)
-                    cv2.waitKey(0)
-                    cv2.destroyAllWindows()
-                    """
-            else:
-                pass
-
-    def generate_stand_table(self):
-        single_entry = self.range + ',' + self.column + ',' + str(self.num_plant)
-        self.stand_table.append(single_entry)
-
-    def generate_stand_csv(self):
-        csv_file = open(self.path + 'uav_stand.csv', 'wb')
-        for item in self.stand_table:
-            csv_file.write('%s\n' % item)
-        print('The stand count table is generated.')
-
-    def generate_plant_csv(self):
-        plant_csv = open(self.path + 'plant_location.csv', 'wb')
-        for item in self.plant_table:
-            plant_csv.write('%s\n' % item)
-        print('The plant location table is generated.')
-
-    def plant_labeling(self):
-
-        path = self.path + 'subplot/'
-        plot_name_list = os.listdir(path)
-
-        for plotname in plot_name_list:
-
-            img_color = cv2.imread(path + plotname, 1)
-            basename = plotname.split('.')[0]
-            col = plotname.split('_')[0][1:]
-            ran = plotname.split('_')[1][1:]
-
-            # convert the plant location table to a pandas dataframe
-            df = pd.DataFrame([line.split(',') for line in stand.plant_table],
-                              columns=['AbsR', 'AbsC', 'LocX', 'LocY'])
-            # drop the title row
-            df.drop(df.index[0])
-            df_plot = df.loc[(df['AbsC'] == col) & (df['AbsR'] == ran)]
-
-            for i in range(len(df_plot)):
-                plant_loc = (int(df_plot.iloc[i]['LocX']), int(df_plot.iloc[i]['LocY']))
-
-                cv2.circle(img_color,
-                           plant_loc,
-                           radius=10,
-                           color=(0, 0, 255),
-                           thickness=1,
-                           lineType=8,
-                           shift=0
-                           )
-            cv2.imwrite(path + basename + '_stand.tif', img_color)
+# Example configuration with size thresholds for objects
+config = {
+    "min_area": 50,     # Minimum contour area to consider as a valid object
+    "max_area": 5000    # Maximum contour area to consider as a valid object
+}
 
 
-if __name__ == "__main__":
-    stand = CornStandCount()
-    stand.get_img_file_names()
+# Example usage function
+def process_image(tile_obj):
+    """
+    Wrapper function to process an input image object from UAV and count stands.
+    
+    Args:
+        tile_obj: Object containing image data.
+    
+    Returns:
+        dict: Dictionary containing the stand count result.
+    """
+    # Extract image data
+    plot_image = tile_obj.get_rotate_by_heading_output(reprocess=False)[0]
 
-    for filename in stand.plot_rgb_list:
-        stand.meta_parser(filename)
-        print(filename)
-        stand.plant_count()
-        # print(stand.num_plant)
-        stand.generate_stand_table()
-
-    stand.generate_stand_csv()
-    stand.generate_plant_csv()
-
-    print('Labeling plant images.....')
-    stand.plant_labeling()
-    print('Plant labeling is completed.')
+    # Perform stand counting and return result
+    return count_stands(plot_image, config)
