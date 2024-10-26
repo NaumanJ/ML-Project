@@ -1,4 +1,5 @@
 ------------------------------------------------------------------------------------------------------------
+""
 Measuring Texture Feature Coarseness
 1. Input Image
 Start with the input image.
@@ -17,6 +18,7 @@ Where 𝑘𝑚𝑎𝑥kmax​ is the scale that gives the maximum 𝐷ℎ+𝐷�
 6. Compute Average Coarseness
 Average the values of 𝑆(𝑖,𝑗)S(i,j) over all pixels (𝑖,𝑗)(i,j) in the image to obtain the coarseness feature 𝐹𝑐𝑜𝑎𝑟𝑠𝑒Fcoarse​:𝐹𝑐𝑜𝑎𝑟𝑠𝑒=1𝑁∑𝑖,𝑗𝑆(𝑖,𝑗)Fcoarse​=N1​i,j∑​S(i,j)
 Where 𝑁N is the total number of pixels.
+""
 ------------------------------------------------------------------------------------------------------------  
 import numpy as np
 from skimage import io, color
