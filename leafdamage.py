@@ -1,5 +1,31 @@
 """
 This module computes leaf damage ratio index from UAV RGB plot 
+
+Original Outline Recap
+Configuration: Parsing thresholds and insets for filtering damaged areas.
+Image Preparation: Validating and converting RGB channels, resizing or standardizing pixel intensity.
+Leaf Damage Index Calculation: Applying thresholds to detect damaged regions, possibly based on color values indicative of damage (e.g., brownish areas).
+
+Code Explanation:
+Configuration and Initialization: Defines threshold parameters in a dictionary, config, for easy adjustments.
+
+Image Preprocessing:
+
+The function checks that the image is an RGB three-channel image.
+The image is converted from BGR to LAB color space to enhance brown/green detection in a less lighting-sensitive way.
+Thresholding for Damaged Areas:
+
+Uses the a channel from the LAB color space to create a mask of areas with "brown" tones (indicating possible leaf damage).
+Center-Focused Masking:
+
+Applies a central mask based on a configurable border_ratio to avoid edge effects.
+Leaf Damage Index Calculation:
+
+Calculates the percentage of "damaged" pixels relative to the total pixels in the masked region.
+Result Return:
+
+Returns a dictionary with the leaf damage index, reason, and diagnostic data for further insights.
+
 """
 
 import cv2
